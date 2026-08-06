@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}PDF Yükle - Akıllı Katalog{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="d-flex align-items-center mb-4">
+            <i class="bi bi-file-earmark-pdf me-2" style="font-size:1.5rem;color:#2563eb;"></i>
+            <div>
+                <h4 class="mb-0 fw-semibold">PDF Katalog Yükle</h4>
+                <small class="text-muted">Bir katalog sayfasından ürünleri otomatik çıkarın</small>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">PDF Dosyası</label>
+                        <input type="file" name="pdf" accept="application/pdf" class="form-control" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-medium">Sayfa Numarası</label>
+                            <input type="number" name="page" min="1" value="9" class="form-control" required>
+                            <small class="text-muted">İşlenecek katalog sayfası</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-medium">Kategori (opsiyonel)</label>
+                            <input type="text" name="category" class="form-control" placeholder="Örn: Dekoratif Armatür">
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-medium">Sayfa Düzeni (ızgara)</label>
+                        <input type="text" name="layout" value="3,3,3,4" class="form-control">
+                        <small class="text-muted">
+                            Her satırdaki sütun sayısı, virgülle. Örn: "3,3,3,4" = ilk 3 satır 3'lü, son satır 4'lü.
+                            Tüm sayfa 3'lüyse "3,3,3,3" yazın.
+                        </small>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">İptal</a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-magic me-1"></i>Ürünleri Çıkar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="alert alert-info mt-3" style="font-size:0.85rem;">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Nasıl çalışır?</strong> Sistem, seçtiğiniz sayfadaki metinleri (SKU, ürün adı, fiyat)
+            okur ve sayfayı ızgaraya bölerek her ürünün görselini kırpar. Çıkan ürünler kataloğa eklenir.
+            Bu bir test aracıdır; sonuçları kontrol etmeniz önerilir.
+        </div>
+    </div>
+</div>
+{% endblock %}
