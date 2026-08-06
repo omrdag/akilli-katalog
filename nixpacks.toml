@@ -1,0 +1,4 @@
+# Railway/Nixpacks yapılandırması
+# poppler_utils: pdftotext ve pdftoppm komutları için (PDF metin + görsel çıkarma)
+[phases.setup]
+nixPkgs = ["python311", "poppler_utils"]
