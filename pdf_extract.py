@@ -1,147 +1,117 @@
 """
-Akıllı Katalog — PDF'ten ürün çıkarma modülü.
-
-Yaklaşım:
-- Metin: pdftotext (poppler) ile -layout modunda. Bu PDF türünde en güvenilir yol.
-- Görsel: pdftoppm (poppler) ile sayfayı PNG'ye çevir, ızgaraya göre hücre kırp.
-- Eşleştirme: metindeki SKU sırası ile ızgara hücre sırası (soldan sağa, üstten alta).
-
-poppler-utils gereklidir (pdftotext, pdftoppm). Railway'de nixpacks.toml ile kurulur.
+Akıllı Katalog — PDF'ten ürün çıkarma (poppler'sız).
+Metin+konum: pdfplumber. Görsel: PyMuPDF/fitz. Poppler GEREKMEZ.
 """
 import re
-import os
-import subprocess
-import base64
 import io
-import tempfile
+import base64
+
+import pdfplumber
+import fitz
+from PIL import Image
+
+SKU_RE = re.compile(r'CT-\d+')
+# Ada karışan etiketleri temizle
+NOISE = {'YENi', 'YENİ', 'OYNAR', 'BAŞLIKLI', 'DAİRE', 'DELİK', 'ÇAPI', 'KARE',
+         'ÇERÇEVESİZ', 'PANEL', 'AYARLANABİLİR', 'ÖLÇÜ', 'W', 'K'}
 
 
-SKU_RE = re.compile(r'CT-\d+(?:\s+[A-Z]{1,3})?')
+def clean_name(name):
+    parts = [p for p in name.split() if p.strip() and p.strip() not in NOISE]
+    return re.sub(r'\s+', ' ', ' '.join(parts)).strip()[:50]
 
 
-def extract_page_text(pdf_path, page_num):
-    """Belirli bir sayfanın metnini -layout modunda döndürür."""
-    try:
-        result = subprocess.run(
-            ['pdftotext', '-f', str(page_num), '-l', str(page_num), '-layout', pdf_path, '-'],
-            capture_output=True, text=True, timeout=30
-        )
-        return result.stdout
-    except Exception as e:
-        print(f"[PDFExtract] metin hatası: {e}")
-        return ""
-
-
-def parse_products_from_text(text):
-    """Metinden ürünleri (sku, ad, fiyat) sırayla çıkarır.
-    Katalog formatı: 'CT-5418 ASSOS (SİYAH-BAKIR)   110'
-    """
+def extract_products_with_positions(pdf_path, page_num):
     products = []
-    # Satırları tara; her CT- kodu bir ürün başlangıcı
-    # Metinde birden fazla ürün aynı satırda olabilir (3 sütun yan yana)
-    # Bu yüzden tüm metinde CT-XXXX ... fiyat kalıplarını yakalıyoruz.
-    # Kalıp: CT-<rakam>[ SB/SP/BP/BB] <AD ...> <fiyat(rakam)>
-    pattern = re.compile(
-        r'(CT-\d+(?:\s+[A-Z]{1,3})?)\s+'      # SKU (opsiyonel varyant SB/SP...)
-        r'([A-ZÇĞİÖŞÜa-zçğıöşü0-9\.\-\s\(\)/]+?)\s+'  # ürün adı
-        r'(\d{2,4})(?:\s|₺|i|$)'              # fiyat (2-4 hane)
-    )
-    for m in pattern.finditer(text):
-        sku = m.group(1).strip()
-        name = m.group(2).strip()
-        price = m.group(3).strip()
-        # Ürün adı çok uzun/kirliyse kırp
-        name = re.sub(r'\s+', ' ', name)
-        if len(name) > 60:
-            name = name[:60]
-        products.append({'sku': sku, 'name': name, 'price': price})
+    with pdfplumber.open(pdf_path) as pdf:
+        if page_num < 1 or page_num > len(pdf.pages):
+            return products, None, None
+        page = pdf.pages[page_num - 1]
+        page_w = page.width
+        page_h = page.height
+        words = page.extract_words()
+
+    skus = [(w, SKU_RE.match(w['text']).group(0)) for w in words
+            if SKU_RE.match(w['text']) and 0 <= w['x0'] <= page_w and 0 <= w['top'] <= page_h]
+
+    for sw, sku in skus:
+        sy, sx = sw['top'], sw['x0']
+        # aynı satırda sonraki SKU'nun x'i = sağ sınır
+        next_x = page_w + 100
+        for w2, s2 in skus:
+            if abs(w2['top'] - sy) < 15 and w2['x0'] > sx + 5:
+                next_x = min(next_x, w2['x0'])
+        name_bits = []
+        price = None
+        raw_extra = sw['text'][len(sku):]
+        if raw_extra:
+            name_bits.append(raw_extra)
+        for w in words:
+            if abs(w['top'] - sy) < 15 and sx < w['x0'] < next_x:
+                t = w['text']
+                if SKU_RE.match(t):
+                    continue
+                if re.fullmatch(r'\d{2,4}', t.replace('₺', '').strip()):
+                    if price is None:
+                        price = t.replace('₺', '').strip()
+                    continue
+                if t.strip() and not t.startswith('₺'):
+                    name_bits.append(t.strip())
+        name = clean_name(' '.join(name_bits))
+        products.append({'sku': sku, 'name': name, 'price': price or '0', 'x': sx, 'y': sy})
+
+    products.sort(key=lambda p: (round(p['y'] / 20), p['x']))
+    return products, page_w, page_h
+
+
+def crop_image_at(pdf_path, page_num, products, page_w, page_h, dpi=150):
+    doc = fitz.open(pdf_path)
+    page = doc[page_num - 1]
+    pix = page.get_pixmap(dpi=dpi)
+    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    IW, IH = img.size
+    sx = IW / page_w
+    sy = IH / page_h
+    ys = sorted(set(round(p['y']) for p in products))
+    xs = sorted(set(round(p['x']) for p in products))
+
+    def gaps(vals):
+        if len(vals) < 2:
+            return None
+        ds = [vals[i+1]-vals[i] for i in range(len(vals)-1) if vals[i+1]-vals[i] > 5]
+        return min(ds) if ds else None
+
+    row_gap = gaps(ys) or (page_h * 0.22)
+    col_gap = gaps(xs) or (page_w * 0.30)
+
+    for p in products:
+        x0 = max(0, p['x'] * sx - 5)
+        y0 = max(0, p['y'] * sy - 5)
+        x1 = min(IW, (p['x'] + col_gap) * sx)
+        y1 = min(IH, (p['y'] + row_gap) * sy)
+        try:
+            crop = img.crop((int(x0), int(y0), int(x1), int(y1)))
+            buf = io.BytesIO()
+            crop.save(buf, format='PNG')
+            p['image_b64'] = base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            p['image_b64'] = None
     return products
 
 
-def render_page_image(pdf_path, page_num, dpi=150):
-    """Sayfayı PNG'ye çevirip yolunu döndürür."""
-    tmpdir = tempfile.mkdtemp()
-    prefix = os.path.join(tmpdir, 'page')
-    try:
-        subprocess.run(
-            ['pdftoppm', '-f', str(page_num), '-l', str(page_num), '-png', '-r', str(dpi), pdf_path, prefix],
-            capture_output=True, timeout=60
-        )
-        # pdftoppm çıktısı: page-NN.png
-        for f in os.listdir(tmpdir):
-            if f.endswith('.png'):
-                return os.path.join(tmpdir, f)
-    except Exception as e:
-        print(f"[PDFExtract] görüntü hatası: {e}")
-    return None
-
-
-def crop_grid_cells(image_path, rows_layout):
-    """Sayfa görüntüsünü ızgaraya göre hücrelere böler.
-    rows_layout: her satırdaki sütun sayısı listesi, örn. [3,3,3,4]
-    Döndürür: base64 PNG listesi (okuma sırasına göre).
-    """
-    from PIL import Image
-    img = Image.open(image_path)
-    W, H = img.size
-
-    # Kenar/başlık boşlukları (deneysel, 150 dpi A4 için)
-    left_margin = int(W * 0.038)
-    right_margin = int(W * 0.038)
-    top = int(H * 0.078)
-    bottom = int(H * 0.96)
-
-    grid_w = W - left_margin - right_margin
-    n_rows = len(rows_layout)
-    row_h = (bottom - top) / n_rows
-
-    cells_b64 = []
-    for r, ncols in enumerate(rows_layout):
-        col_w = grid_w / ncols
-        for c in range(ncols):
-            x1 = int(left_margin + c * col_w)
-            y1 = int(top + r * row_h)
-            x2 = int(left_margin + (c + 1) * col_w)
-            y2 = int(top + (r + 1) * row_h)
-            crop = img.crop((x1, y1, x2, y2))
-            buf = io.BytesIO()
-            crop.save(buf, format='PNG')
-            b64 = base64.b64encode(buf.getvalue()).decode()
-            cells_b64.append(b64)
-    return cells_b64
-
-
-def extract_catalog_page(pdf_path, page_num, rows_layout):
-    """Ana fonksiyon: bir sayfadan ürünleri (metin + görsel) çıkarır.
-    rows_layout: örn. [3,3,3,4] — her satırdaki sütun sayısı.
-    Döndürür: [{'sku','name','price','image_b64'}, ...]
-    """
-    text = extract_page_text(pdf_path, page_num)
-    products = parse_products_from_text(text)
-
-    img_path = render_page_image(pdf_path, page_num)
-    cells = []
-    if img_path:
-        try:
-            cells = crop_grid_cells(img_path, rows_layout)
-        except Exception as e:
-            print(f"[PDFExtract] kırpma hatası: {e}")
-
-    # Ürünleri hücrelerle eşleştir (sıra bazlı)
-    results = []
-    for i, prod in enumerate(products):
-        prod['image_b64'] = cells[i] if i < len(cells) else None
-        results.append(prod)
-    return results
+def extract_catalog_page(pdf_path, page_num, rows_layout=None):
+    products, page_w, page_h = extract_products_with_positions(pdf_path, page_num)
+    if not products:
+        return []
+    products = crop_image_at(pdf_path, page_num, products, page_w, page_h)
+    return [{'sku': p['sku'], 'name': p['name'], 'price': p['price'],
+             'image_b64': p.get('image_b64')} for p in products]
 
 
 if __name__ == '__main__':
-    # Yerel test
     pdf = '/mnt/user-data/uploads/cata-2024-fiyat-listesi.pdf'
-    page = 9
-    layout = [3, 3, 3, 4]
-    prods = extract_catalog_page(pdf, page, layout)
-    print(f"Çıkarılan ürün sayısı: {len(prods)}")
+    prods = extract_catalog_page(pdf, 9)
+    print(f"Cikarilan: {len(prods)} urun")
     for p in prods:
-        has_img = "✓görsel" if p.get('image_b64') else "✗görsel"
-        print(f"  {p['sku']:14} | {p['name']:30} | {p['price']:>4}₺ | {has_img}")
+        has = "var" if p.get('image_b64') else "yok"
+        print(f"  {p['sku']:8} | {p['name']:32} | {p['price']:>4} | gorsel:{has}")
