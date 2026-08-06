@@ -272,6 +272,59 @@ def export_quote():
                      as_attachment=True, download_name=fname)
 
 
+@app.route('/sistem-kontrol')
+def sistem_kontrol():
+    """Teşhis: poppler (pdftotext/pdftoppm) kurulu mu ve çalışıyor mu?"""
+    import subprocess
+    import shutil
+    checks = {}
+
+    checks['pdftotext_yolu'] = shutil.which('pdftotext') or 'BULUNAMADI'
+    checks['pdftoppm_yolu'] = shutil.which('pdftoppm') or 'BULUNAMADI'
+
+    try:
+        r = subprocess.run(['pdftotext', '-v'], capture_output=True, text=True, timeout=10)
+        checks['pdftotext_versiyon'] = (r.stderr or r.stdout or '').strip().split('\n')[0]
+    except Exception as e:
+        checks['pdftotext_versiyon'] = f'HATA: {e}'
+
+    try:
+        import PIL
+        checks['Pillow'] = f'OK ({PIL.__version__})'
+    except Exception as e:
+        checks['Pillow'] = f'HATA: {e}'
+
+    try:
+        pdfs = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith('.pdf')]
+        checks['yuklenen_pdfler'] = str(pdfs) if pdfs else 'hiç PDF yok'
+        if pdfs:
+            test_pdf = os.path.join(UPLOAD_DIR, pdfs[0])
+            r = subprocess.run(['pdftotext', '-f', '9', '-l', '9', '-layout', test_pdf, '-'],
+                               capture_output=True, text=True, timeout=30)
+            out = r.stdout or ''
+            import re
+            skus = re.findall(r'CT-\d+', out)
+            checks['test_metin_uzunlugu'] = len(out)
+            checks['test_bulunan_sku'] = len(set(skus))
+            checks['test_hata'] = (r.stderr or '')[:200]
+    except Exception as e:
+        checks['test_cikarma'] = f'HATA: {e}'
+
+    rows = ''.join([f'<tr><td style="padding:8px;border-bottom:1px solid #eee;font-weight:600;">{k}</td>'
+                    f'<td style="padding:8px;border-bottom:1px solid #eee;font-family:monospace;word-break:break-all;">{v}</td></tr>'
+                    for k, v in checks.items()])
+    return f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sistem Kontrol</title></head>
+    <body style="font-family:system-ui;padding:30px;background:#f8fafc;">
+    <h2>Sistem Kontrol</h2>
+    <table style="width:100%;max-width:800px;background:#fff;border-radius:8px;border-collapse:collapse;">
+    {rows}
+    </table>
+    <p style="margin-top:20px;color:#64748b;font-size:0.9rem;">
+    pdftotext_yolu "BULUNAMADI" ise poppler kurulmamış demektir.
+    </p>
+    </body></html>'''
+
+
 init_db()
 
 if __name__ == '__main__':
