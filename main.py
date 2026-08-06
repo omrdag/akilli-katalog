@@ -72,8 +72,8 @@ def index():
     sql = 'SELECT * FROM products WHERE 1=1'
     params = []
     if q:
-        sql += ' AND (sku LIKE ? OR product_name LIKE ?)'
-        params += [f'%{q}%', f'%{q}%']
+        sql += ' AND (sku LIKE ? OR product_name LIKE ? OR category LIKE ?)'
+        params += [f'%{q}%', f'%{q}%', f'%{q}%']
     if category:
         sql += ' AND category = ?'
         params.append(category)
@@ -120,7 +120,7 @@ def upload():
 
         # Çıkar
         try:
-            products = extract_catalog_page(pdf_path, page, rows_layout)
+            products, pdf_category = extract_catalog_page(pdf_path, page, rows_layout)
         except Exception as e:
             flash(f'PDF işlenirken hata: {e}', 'error')
             return redirect(url_for('upload'))
@@ -128,6 +128,9 @@ def upload():
         if not products:
             flash('Bu sayfada ürün bulunamadı. Sayfa numarasını kontrol edin.', 'error')
             return redirect(url_for('upload'))
+
+        # Kategori: kullanıcı elle girdiyse onu kullan, yoksa PDF'ten çekileni
+        final_category = category or pdf_category or None
 
         # Kaydet
         db = get_db()
@@ -140,7 +143,7 @@ def upload():
                 p.get('sku', ''),
                 p.get('name', ''),
                 float(p.get('price', 0) or 0),
-                category or None,
+                p.get('category') or final_category,
                 ('data:image/png;base64,' + p['image_b64']) if p.get('image_b64') else None,
                 filename,
                 page
@@ -148,7 +151,8 @@ def upload():
             saved += 1
         db.commit()
 
-        flash(f'{saved} ürün başarıyla çıkarıldı ve kaydedildi.', 'success')
+        cat_msg = f' Kategori: {final_category}.' if final_category else ''
+        flash(f'{saved} ürün başarıyla çıkarıldı ve kaydedildi.{cat_msg}', 'success')
         return redirect(url_for('index'))
 
     return render_template('upload.html')
