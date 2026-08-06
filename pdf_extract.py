@@ -16,6 +16,23 @@ NOISE = {'YENi', 'YENİ', 'OYNAR', 'BAŞLIKLI', 'DAİRE', 'DELİK', 'ÇAPI', 'KA
          'ÇERÇEVESİZ', 'PANEL', 'AYARLANABİLİR', 'ÖLÇÜ', 'W', 'K'}
 
 
+def extract_category(page, page_w, page_h):
+    """Sayfanın üst başlığını (kategori) çıkarır.
+    Ürünlerle aynı bölgeden (görünür x aralığı) alır ki doğru başlık gelsin.
+    """
+    words = page.extract_words()
+    top_words = [w for w in words
+                 if w['top'] < page_h * 0.10 and 0 <= w['x0'] <= page_w]
+    if not top_words:
+        return ''
+    top_words.sort(key=lambda w: (round(w['top']), w['x0']))
+    title = re.sub(r'\s+', ' ', ' '.join(w['text'] for w in top_words)).strip()
+    # Fiyat listesi/içindekiler sayfalarını ele (KOD SAYFA FİYAT tekrarı)
+    if 'KOD SAYFA' in title or title.count('FİYAT') > 1:
+        return ''
+    return title[:80]
+
+
 def clean_name(name):
     parts = [p for p in name.split() if p.strip() and p.strip() not in NOISE]
     return re.sub(r'\s+', ' ', ' '.join(parts)).strip()[:50]
@@ -23,12 +40,14 @@ def clean_name(name):
 
 def extract_products_with_positions(pdf_path, page_num):
     products = []
+    category = ''
     with pdfplumber.open(pdf_path) as pdf:
         if page_num < 1 or page_num > len(pdf.pages):
-            return products, None, None
+            return products, None, None, ''
         page = pdf.pages[page_num - 1]
         page_w = page.width
         page_h = page.height
+        category = extract_category(page, page_w, page_h)
         words = page.extract_words()
 
     skus = [(w, SKU_RE.match(w['text']).group(0)) for w in words
@@ -61,7 +80,7 @@ def extract_products_with_positions(pdf_path, page_num):
         products.append({'sku': sku, 'name': name, 'price': price or '0', 'x': sx, 'y': sy})
 
     products.sort(key=lambda p: (round(p['y'] / 20), p['x']))
-    return products, page_w, page_h
+    return products, page_w, page_h, category
 
 
 def crop_image_at(pdf_path, page_num, products, page_w, page_h, dpi=150):
@@ -100,17 +119,19 @@ def crop_image_at(pdf_path, page_num, products, page_w, page_h, dpi=150):
 
 
 def extract_catalog_page(pdf_path, page_num, rows_layout=None):
-    products, page_w, page_h = extract_products_with_positions(pdf_path, page_num)
+    products, page_w, page_h, category = extract_products_with_positions(pdf_path, page_num)
     if not products:
-        return []
+        return [], ''
     products = crop_image_at(pdf_path, page_num, products, page_w, page_h)
-    return [{'sku': p['sku'], 'name': p['name'], 'price': p['price'],
-             'image_b64': p.get('image_b64')} for p in products]
+    result = [{'sku': p['sku'], 'name': p['name'], 'price': p['price'],
+               'image_b64': p.get('image_b64'), 'category': category} for p in products]
+    return result, category
 
 
 if __name__ == '__main__':
     pdf = '/mnt/user-data/uploads/cata-2024-fiyat-listesi.pdf'
-    prods = extract_catalog_page(pdf, 9)
+    prods, cat = extract_catalog_page(pdf, 9)
+    print(f"Kategori: {cat}")
     print(f"Cikarilan: {len(prods)} urun")
     for p in prods:
         has = "var" if p.get('image_b64') else "yok"
