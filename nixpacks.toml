@@ -1,4 +1,11 @@
 # Railway/Nixpacks yapılandırması
+# python311: kararlı Python sürümü (Pillow ve diğer paketlerle uyumlu)
 # poppler_utils: pdftotext ve pdftoppm komutları için (PDF metin + görsel çıkarma)
 [phases.setup]
 nixPkgs = ["python311", "poppler_utils"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv", ". /opt/venv/bin/activate && pip install -r requirements.txt"]
+
+[start]
+cmd = ". /opt/venv/bin/activate && gunicorn main:app --bind 0.0.0.0:$PORT"
