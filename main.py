@@ -16,6 +16,7 @@ import json
 import base64
 import sqlite3
 import threading
+import logging
 import uuid
 import re
 from datetime import datetime
@@ -26,6 +27,7 @@ from werkzeug.utils import secure_filename
 import kategori
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 app.secret_key = os.environ.get('SESSION_SECRET', 'akilli-katalog-dev-key')
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200 MB
 
@@ -135,41 +137,67 @@ def save_products(db, marka, source_pdf, products, replace=True, sayfa=None):
 
 
 def seed_if_empty(db):
-    """data/*.json.gz içindeki hazır kataloğu (ör. ACK 2026) boş veritabanına yükler."""
-    if db.execute('SELECT COUNT(*) FROM products').fetchone()[0]:
-        return
+    """data/*.json.gz içindeki hazır katalogları, veritabanında o marka yoksa yükler."""
     if not os.path.isdir(SEED_DIR):
         return
+    have = {r[0] for r in db.execute('SELECT DISTINCT marka FROM products')}
+    deleted = set()
+    try:
+        deleted = {r[0] for r in db.execute("SELECT marka FROM catalogs WHERE dosya = '__silindi__'")}
+    except sqlite3.Error:
+        pass
     for fn in sorted(os.listdir(SEED_DIR)):
-        if fn.endswith('.json.gz'):
+        if not fn.endswith('.json.gz'):
+            continue
+        try:
             with gzip.open(os.path.join(SEED_DIR, fn), 'rt', encoding='utf-8') as f:
                 data = json.load(f)
-            save_products(db, data['marka'], data['kaynak'], data['products'], replace=True,
-                          sayfa=data.get('stats', {}).get('sayfa'))
+        except Exception:
+            app.logger.exception('Hazır veri okunamadı: %s', fn)
+            continue
+        if data['marka'] in have or data['marka'] in deleted:
+            continue
+        save_products(db, data['marka'], data['kaynak'], data['products'], replace=True,
+                      sayfa=data.get('stats', {}).get('sayfa'))
 
 
 # ── Arka plan işleri (PDF çıkarma) ──
 JOBS = {}
 
 
-def run_job(job_id, pdf_path, marka, filename):
-    from catalog_extract import extract_catalog
+def run_job(job_id, pdf_path, marka, filename, sku_ornek=None):
+    from catalog_extract import extract_catalog, ExtractError
     job = JOBS[job_id]
 
     def progress(i, n, msg):
         job.update(i=i, n=n, msg=msg)
 
     try:
-        result = extract_catalog(pdf_path, progress)
+        result = extract_catalog(pdf_path, progress, sku_ornek=sku_ornek)
         db = connect()
         saved = save_products(db, marka, filename, result['products'], replace=True,
                               sayfa=result['stats'].get('sayfa'))
         db.close()
         uyari = sum(1 for p in result['products'] if p['uyari'])
-        job.update(state='done', saved=saved, uyari=uyari, stats=result['stats'],
-                   msg=f'{saved} ürün kaydedildi ({uyari} uyarılı).')
+        msg = f'{saved} ürün kaydedildi ({uyari} uyarılı).'
+        bos = result['stats'].get('yazisiz_sayfalar') or []
+        if bos:
+            msg += (f' Not: {len(bos)} sayfada okunabilir yazı yok (sayfa {", ".join(map(str, bos[:12]))}'
+                    f'{"…" if len(bos) > 12 else ""}); bu sayfalardaki ürünler alınamadı. '
+                    'Sıkıştırılmamış orijinal PDF ile daha fazla ürün çıkar.')
+        job.update(state='done', saved=saved, uyari=uyari, stats=result['stats'], msg=msg)
+    except ExtractError as e:
+        job.update(state='error', msg=str(e))
+    except MemoryError:
+        job.update(state='error', msg='Sunucunun belleği bu PDF için yetmedi. Kataloğu bölümlere ayırıp yükleyin.')
     except Exception as e:  # noqa
-        job.update(state='error', msg=f'PDF işlenirken hata: {e}')
+        app.logger.exception('Katalog işleme hatası')
+        job.update(state='error', msg=f'Beklenmeyen hata: {type(e).__name__}: {e}')
+    finally:
+        try:
+            os.remove(pdf_path)       # disk dolmasın
+        except OSError:
+            pass
 
 
 # ── Filtreleme ──
@@ -324,7 +352,7 @@ def panel():
     for (u,) in db.execute("SELECT uyari FROM products WHERE COALESCE(uyari,'')<>''"):
         for x in u.split('|'):
             warns[x] = warns.get(x, 0) + 1
-    catalogs = db.execute('SELECT * FROM catalogs ORDER BY yuklenme DESC LIMIT 10').fetchall()
+    catalogs = db.execute("SELECT * FROM catalogs WHERE dosya <> '__silindi__' ORDER BY yuklenme DESC LIMIT 10").fetchall()
     return render_template('panel.html', k=k, brands=brands, groups=groups, top_cats=top_cats, montaj=montaj,
                            ips=sorted(ips.items()), warns=sorted(warns.items(), key=lambda x: -x[1]),
                            catalogs=catalogs)
@@ -429,18 +457,26 @@ def upload():
     if request.method == 'POST':
         file = request.files.get('pdf')
         marka = (request.form.get('marka') or '').strip()
+        sku_ornek = (request.form.get('sku_ornek') or '').strip() or None
         if not file or not file.filename.lower().endswith('.pdf'):
             flash('Lütfen bir PDF dosyası seçin.', 'error')
             return redirect(url_for('upload'))
         if not marka:
             flash('Lütfen marka adını girin.', 'error')
             return redirect(url_for('upload'))
+        if any(j.get('state') == 'running' for j in JOBS.values()):
+            flash('Şu anda başka bir katalog işleniyor. Bitince tekrar deneyin.', 'error')
+            return redirect(url_for('upload'))
         filename = secure_filename(file.filename) or 'katalog.pdf'
-        pdf_path = os.path.join(UPLOAD_DIR, filename)
-        file.save(pdf_path)
         job_id = uuid.uuid4().hex[:10]
+        pdf_path = os.path.join(UPLOAD_DIR, f'{job_id}_{filename}')
+        try:
+            file.save(pdf_path)
+        except OSError as e:
+            flash(f'Dosya sunucuya kaydedilemedi: {e}', 'error')
+            return redirect(url_for('upload'))
         JOBS[job_id] = dict(state='running', i=0, n=0, msg='Başlatılıyor', marka=marka, file=filename)
-        threading.Thread(target=run_job, args=(job_id, pdf_path, marka, filename), daemon=True).start()
+        threading.Thread(target=run_job, args=(job_id, pdf_path, marka, filename, sku_ornek), daemon=True).start()
         return redirect(url_for('job_page', job_id=job_id))
     markalar = [r[0] for r in get_db().execute('SELECT DISTINCT marka FROM products WHERE marka IS NOT NULL ORDER BY marka')]
     return render_template('upload.html', markalar=markalar)
@@ -470,10 +506,13 @@ def delete_all():
     if marka:
         db.execute('DELETE FROM products WHERE marka = ?', (marka,))
         db.execute('DELETE FROM catalogs WHERE marka = ?', (marka,))
+        db.execute("INSERT INTO catalogs (marka, dosya, urun) VALUES (?, '__silindi__', 0)", (marka,))
         msg = f'{marka} ürünleri silindi.'
     else:
+        markalar = [r[0] for r in db.execute('SELECT DISTINCT marka FROM products')]
         db.execute('DELETE FROM products')
         db.execute('DELETE FROM catalogs')
+        db.executemany("INSERT INTO catalogs (marka, dosya, urun) VALUES (?, '__silindi__', 0)", [(x,) for x in markalar])
         msg = 'Tüm ürünler silindi.'
     db.commit()
     flash(msg, 'success')
@@ -606,6 +645,21 @@ def sistem_kontrol():
     checks['veritabani'] = DB_PATH
     markalar = [r[0] for r in db.execute('SELECT DISTINCT marka FROM products WHERE marka IS NOT NULL ORDER BY marka')]
     return render_template('sistem.html', checks=checks, markalar=markalar)
+
+
+@app.errorhandler(413)
+def too_large(e):
+    flash('Dosya çok büyük (en fazla 200 MB).', 'error')
+    return redirect(url_for('upload'))
+
+
+@app.errorhandler(Exception)
+def unhandled(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    app.logger.exception('Beklenmeyen hata')
+    return render_template('hata.html', hata=f'{type(e).__name__}: {e}'), 500
 
 
 init_db()

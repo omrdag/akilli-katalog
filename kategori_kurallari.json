@@ -166,6 +166,102 @@
     "OUTLET": [
       "Outlet",
       "Outlet Ürünler"
+    ],
+    "PENDANT LAMP": [
+      "İç Mekan Aydınlatma",
+      "Sarkıt Armatürler"
+    ],
+    "LED ARMATÜRLER": [
+      "İç Mekan Aydınlatma",
+      "LED Armatürler"
+    ],
+    "RAYLI LED ARMATÜRLER": [
+      "İç Mekan Aydınlatma",
+      "Ray Armatürleri ve Rayları"
+    ],
+    "LED HIGH BAY TAVAN ARMATÜRÜ": [
+      "Endüstriyel Aydınlatma",
+      "Yüksek Tavan Armatürleri"
+    ],
+    "DUVAR VE MUTFAK ARMATÜRLERİ": [
+      "İç Mekan Aydınlatma",
+      "Duvar ve Mutfak Armatürleri"
+    ],
+    "CAMLI TAVAN ARMATÜRLERİ": [
+      "İç Mekan Aydınlatma",
+      "Tavan Armatürleri"
+    ],
+    "LED GÖMME ARMATÜRLER": [
+      "İç Mekan Aydınlatma",
+      "LED Spot Armatürler"
+    ],
+    "LEDLİ ACİL ÇIKIŞ AYDINLATMALARI": [
+      "Acil Durum ve Taşınabilir",
+      "Acil Durum Aydınlatmaları"
+    ],
+    "ŞARJLI IŞILDAKLAR": [
+      "Acil Durum ve Taşınabilir",
+      "Işıldak ve Kamp Lambaları"
+    ],
+    "ŞERİT LED": [
+      "LED Şerit Sistemleri",
+      "LED Şeritler"
+    ],
+    "ŞERİT LED TRAFOLARI": [
+      "LED Şerit Sistemleri",
+      "LED Sürücüler (Trafolar)"
+    ],
+    "MASA VE GECE LAMBALARI": [
+      "İç Mekan Aydınlatma",
+      "Masa Lambaları"
+    ],
+    "UZAKTAN KUMANDALI KAPI ZİLLERİ": [
+      "Elektrik ve Akıllı Ev",
+      "Kapı Zilleri"
+    ],
+    "IŞIK KONTROL UZAKTAN KUMANDALARI": [
+      "Elektrik ve Akıllı Ev",
+      "Kumandalar ve Kontrol"
+    ],
+    "ZAMANLAYICI": [
+      "Elektrik ve Akıllı Ev",
+      "Zamanlayıcılar"
+    ],
+    "FOTOSELLER": [
+      "Elektrik ve Akıllı Ev",
+      "Sensörler"
+    ],
+    "METAL VE PLASTİK BAHÇE ARMATÜRLERİ": [
+      "Dış Mekan Aydınlatma",
+      "Bahçe Armatürleri"
+    ],
+    "FANLAR": [
+      "Elektrik ve Akıllı Ev",
+      "Fanlar"
+    ],
+    "SENSÖRLÜ ARMATÜRLER": [
+      "İç Mekan Aydınlatma",
+      "Tavan Armatürleri"
+    ],
+    "NEMLİYER ARMATÜRLER": [
+      "Dış Mekan Aydınlatma",
+      "Nemli Yer Armatürleri"
+    ],
+    "PLASTİK GLOB ARMATÜRLER": [
+      "Dış Mekan Aydınlatma",
+      "Bahçe Armatürleri"
+    ],
+    "SİGORTA KUTULARI": [
+      "Elektrik ve Akıllı Ev",
+      "Sigorta Kutuları"
+    ],
+    "GRUP PRİZLER": [
+      "Elektrik ve Akıllı Ev",
+      "Prizler"
+    ],
+    "AKSESUARLAR": [
+      "Elektrik ve Akıllı Ev",
+      "Aksesuarlar"
     ]
   },
   "baslik_duzeltme": {

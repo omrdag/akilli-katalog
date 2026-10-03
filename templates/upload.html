@@ -21,6 +21,11 @@
                         <datalist id="markalar">{% for m in markalar %}<option value="{{ m }}">{% endfor %}</datalist>
                         <small class="text-muted">Aynı markayla tekrar yüklerseniz o markanın eski ürünleri yenileriyle değiştirilir.</small>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium" for="sku_ornek">Örnek ürün kodu <span class="text-muted fw-normal">(isteğe bağlı)</span></label>
+                        <input type="text" id="sku_ornek" name="sku_ornek" class="form-control" placeholder="Örn: 001-004-0005 veya AD05-02400">
+                        <small class="text-muted">Boş bırakın; kod biçimi otomatik bulunur. Bulunamazsa katalogdan bir kodu buraya yazın.</small>
+                    </div>
                     <div class="mb-4">
                         <label class="form-label fw-medium" for="pdf">PDF Dosyası</label>
                         <input type="file" id="pdf" name="pdf" accept="application/pdf" class="form-control" required>
@@ -40,7 +45,9 @@
                 <li>Katalogda fiyat listesi sayfaları varsa fiyatlar oradan alınır ve sayfalarla karşılaştırılır.</li>
                 <li>Kategori sayfa kenarındaki başlıktan okunur, <code>kategori_kurallari.json</code> ile ortak kategorilere eşlenir.</li>
                 <li>Sıva altı / sıva üstü bilgisi ürün adından ya da sayfadaki ikonlardan belirlenir.</li>
+                <li>Kategoriler içindekiler sayfasından, yoksa sayfa başlıklarından alınır.</li>
                 <li>Büyük kataloglar 1–2 dakika sürebilir. Uyarılı ürünleri kontrol etmeniz önerilir.</li>
+                <li><b>İpucu:</b> "compressed" / sıkıştırılmış PDF'lerde bazı sayfalar resme dönüşür ve okunamaz. Mümkünse orijinal PDF'i yükleyin.</li>
             </ul>
         </div>
     </div>

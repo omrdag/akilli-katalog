@@ -7,6 +7,7 @@
     <small class="text-muted">{{ job.file }}</small>
     <div class="progress mt-4" style="height:10px;"><div id="bar" class="progress-bar bg-dark" style="width:0%"></div></div>
     <p id="msg" class="mt-2 text-muted">{{ job.msg }}</p>
+    <div id="retry" class="d-none"><a href="{{ url_for('upload') }}" class="btn btn-dark">Tekrar yükle</a></div>
     <div id="done" class="d-none">
       <a href="{{ url_for('catalog', marka=job.marka) }}" class="btn btn-dark">Ürünleri gör</a>
       <a href="{{ url_for('catalog', marka=job.marka, uyari='1') }}" class="btn btn-outline-danger">Uyarılıları kontrol et</a>
@@ -18,11 +19,14 @@
 <script>
 async function poll(){
   try{
-    const r = await fetch('{{ url_for("job_status", job_id=job_id) }}'); const j = await r.json();
+    const r = await fetch('{{ url_for("job_status", job_id=job_id) }}'); const j = r.status === 404 ? {state: 'missing'} : await r.json();
     if (j.n) document.getElementById('bar').style.width = Math.round(100*j.i/j.n)+'%';
     document.getElementById('msg').textContent = j.msg;
     if (j.state === 'done'){ document.getElementById('bar').style.width='100%'; document.getElementById('done').classList.remove('d-none'); return; }
-    if (j.state === 'error' || j.state === 'missing'){ document.getElementById('msg').classList.add('text-danger'); return; }
+    if (j.state === 'error' || j.state === 'missing'){
+      const m = document.getElementById('msg'); m.classList.add('text-danger');
+      if (j.state === 'missing') m.textContent = 'İşlem bulunamadı: sunucu yeniden başlamış olabilir (çoğunlukla bellek yetmediğinde olur). Tekrar deneyin.';
+      document.getElementById('retry').classList.remove('d-none'); return; }
   }catch(e){}
   setTimeout(poll, 1500);
 }

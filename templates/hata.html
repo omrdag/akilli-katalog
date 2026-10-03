@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Hata - Akıllı Katalog{% endblock %}
+{% block content %}
+<div class="box p-4" style="max-width:720px">
+  <h1 class="h4 fw-bold"><i class="bi bi-exclamation-octagon text-danger me-2"></i>Bir hata oluştu</h1>
+  <p class="text-muted">İşlem tamamlanamadı. Aşağıdaki hata mesajını paylaşırsanız sorunu hızlıca bulabiliriz.</p>
+  <pre class="p-3 rounded" style="background:var(--line-2);white-space:pre-wrap;font-size:.85rem">{{ hata }}</pre>
+  <a href="{{ url_for('panel') }}" class="btn btn-dark btn-sm">Panele dön</a>
+  <a href="{{ url_for('upload') }}" class="btn btn-outline-dark btn-sm">Tekrar yükle</a>
+</div>
+{% endblock %}
