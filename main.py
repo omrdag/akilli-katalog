@@ -17,6 +17,7 @@ import base64
 import sqlite3
 import threading
 import uuid
+import re
 from datetime import datetime
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, jsonify, send_file, g, abort, Response)
@@ -33,13 +34,14 @@ UPLOAD_DIR = os.path.join(BASE, 'uploads')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_PATH = os.environ.get('DB_PATH', os.path.join(BASE, 'akilli_katalog.db'))
 SEED_DIR = os.path.join(BASE, 'data')
-PER_PAGE = 120
 
 COLUMNS = {
     'marka': 'TEXT', 'currency': 'TEXT', 'ana_grup': 'TEXT', 'alt_grup': 'TEXT',
     'katalog_baslik': 'TEXT', 'montaj': 'TEXT', 'ozellik': 'TEXT', 'uyari': 'TEXT',
-    'image_blob': 'BLOB',
+    'image_blob': 'BLOB', 'watt': 'REAL', 'cct': 'TEXT', 'renk': 'TEXT', 'ip': 'TEXT', 'attr_v': 'INTEGER',
 }
+ATTR_VERSION = 1
+PER_PAGE_OPTIONS = (48, 96, 192)
 
 
 # ── Veritabanı ──
@@ -83,29 +85,51 @@ def init_db():
             db.execute(f'ALTER TABLE products ADD COLUMN {col} {typ}')
     db.execute('CREATE INDEX IF NOT EXISTS ix_products_sku ON products(sku)')
     db.execute('CREATE INDEX IF NOT EXISTS ix_products_cat ON products(category)')
+    db.execute('CREATE INDEX IF NOT EXISTS ix_products_marka ON products(marka)')
+    db.execute('''CREATE TABLE IF NOT EXISTS catalogs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, marka TEXT, dosya TEXT, sayfa INTEGER,
+        urun INTEGER, uyari INTEGER, gorsel INTEGER, yuklenme TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     db.commit()
     seed_if_empty(db)
+    backfill_attributes(db)
     db.close()
 
 
-def save_products(db, marka, source_pdf, products, replace=True):
+def backfill_attributes(db):
+    """Eski kayıtlar için filtre özelliklerini (W, K, renk, IP) hesaplar."""
+    rows = db.execute('SELECT id, product_name, ozellik, ip FROM products WHERE COALESCE(attr_v,0) < ?',
+                      (ATTR_VERSION,)).fetchall()
+    for r in rows:
+        a = kategori.attributes(dict(ad=r['product_name'], ozellik=r['ozellik'], ip=r['ip']))
+        db.execute('UPDATE products SET watt=?, cct=?, renk=?, ip=?, attr_v=? WHERE id=?',
+                   (a['watt'], a['cct'], a['renk'], a['ip'], ATTR_VERSION, r['id']))
+    db.commit()
+
+
+def save_products(db, marka, source_pdf, products, replace=True, sayfa=None):
     """Çıkarılan ürünleri kategorize edip kaydeder."""
     rules = kategori.load_rules()
     if replace:
         db.execute('DELETE FROM products WHERE marka = ?', (marka,))
+        db.execute('DELETE FROM catalogs WHERE marka = ?', (marka,))
     rows = []
     for p in products:
         grup, kat, montaj = kategori.classify(p, rules)
         img = p.get('image_jpeg')
         if img is None and p.get('image_b64'):
             img = base64.b64decode(p['image_b64'])
+        a = kategori.attributes(p)
         rows.append((p['sku'], p.get('ad', ''), p.get('fiyat'), kat, source_pdf, p.get('sayfa'),
                      marka, p.get('para_birimi') or '', grup, p.get('alt_grup', ''),
                      p.get('katalog_baslik', ''), ','.join(montaj), p.get('ozellik', ''),
-                     '|'.join(p.get('uyari', [])), img))
+                     '|'.join(p.get('uyari', [])), img, a['watt'], a['cct'], a['renk'], a['ip'], ATTR_VERSION))
     db.executemany('''INSERT INTO products (sku, product_name, price, category, source_pdf, source_page,
-                      marka, currency, ana_grup, alt_grup, katalog_baslik, montaj, ozellik, uyari, image_blob)
-                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', rows)
+                      marka, currency, ana_grup, alt_grup, katalog_baslik, montaj, ozellik, uyari, image_blob,
+                      watt, cct, renk, ip, attr_v)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', rows)
+    db.execute('INSERT INTO catalogs (marka, dosya, sayfa, urun, uyari, gorsel) VALUES (?,?,?,?,?,?)',
+               (marka, source_pdf, sayfa, len(rows), sum(1 for p in products if p.get('uyari')),
+                sum(1 for r in rows if r[14])))
     db.commit()
     return len(rows)
 
@@ -120,7 +144,8 @@ def seed_if_empty(db):
         if fn.endswith('.json.gz'):
             with gzip.open(os.path.join(SEED_DIR, fn), 'rt', encoding='utf-8') as f:
                 data = json.load(f)
-            save_products(db, data['marka'], data['kaynak'], data['products'], replace=True)
+            save_products(db, data['marka'], data['kaynak'], data['products'], replace=True,
+                          sayfa=data.get('stats', {}).get('sayfa'))
 
 
 # ── Arka plan işleri (PDF çıkarma) ──
@@ -137,7 +162,8 @@ def run_job(job_id, pdf_path, marka, filename):
     try:
         result = extract_catalog(pdf_path, progress)
         db = connect()
-        saved = save_products(db, marka, filename, result['products'], replace=True)
+        saved = save_products(db, marka, filename, result['products'], replace=True,
+                              sayfa=result['stats'].get('sayfa'))
         db.close()
         uyari = sum(1 for p in result['products'] if p['uyari'])
         job.update(state='done', saved=saved, uyari=uyari, stats=result['stats'],
@@ -146,70 +172,238 @@ def run_job(job_id, pdf_path, marka, filename):
         job.update(state='error', msg=f'PDF işlenirken hata: {e}')
 
 
-# ── Sorgu yardımcıları ──
-def build_filter(args):
+# ── Filtreleme ──
+# Çoklu seçilebilen filtreler: URL'de tekrar eden parametreler (?marka=ACK&marka=CATA)
+LIST_FACETS = {          # parametre: (sütun, virgüllü liste mi?)
+    'marka': ('marka', False),
+    'grup': ('ana_grup', False),
+    'kat': ('category', False),
+    'montaj': ('montaj', True),
+    'cct': ('cct', True),
+    'renk': ('renk', True),
+    'ip': ('ip', False),
+}
+SORTS = {
+    'onerilen': ('Önerilen', "ana_grup, category, alt_grup, id"),
+    'fiyat_artan': ('Fiyat (artan)', "price IS NULL, price ASC"),
+    'fiyat_azalan': ('Fiyat (azalan)', "price IS NULL, price DESC"),
+    'guc_artan': ('Güç (artan)', "watt IS NULL, watt ASC"),
+    'guc_azalan': ('Güç (azalan)', "watt IS NULL, watt DESC"),
+    'sku': ('Ürün kodu', "sku ASC"),
+    'yeni': ('Son eklenen', "id DESC"),
+}
+FACET_LABELS = {'marka': 'Marka', 'grup': 'Ana grup', 'kat': 'Kategori', 'montaj': 'Montaj tipi',
+                'cct': 'Işık rengi', 'renk': 'Gövde rengi', 'ip': 'Koruma (IP)'}
+
+
+def read_filters(req):
+    f = {k: [v for v in req.args.getlist(k) if v.strip()] for k in LIST_FACETS}
+    for k in ('q', 'wmin', 'wmax', 'pmin', 'pmax', 'uyari', 'gorsel', 'sort', 'gorunum'):
+        f[k] = (req.args.get(k) or '').strip()
+    f['sort'] = f['sort'] if f['sort'] in SORTS else 'onerilen'
+    f['gorunum'] = 'liste' if f['gorunum'] == 'liste' else 'izgara'
+    f['adet'] = req.args.get('adet', 48, type=int)
+    if f['adet'] not in PER_PAGE_OPTIONS:
+        f['adet'] = 48
+    return f
+
+
+def build_filter(f, exclude=None):
     where, params = ['1=1'], []
-    q = (args.get('q') or '').strip()
-    if q:
-        for term in q.split():
-            where.append('(sku LIKE ? OR product_name LIKE ? OR ozellik LIKE ? OR category LIKE ? OR alt_grup LIKE ?)')
-            params += [f'%{term}%'] * 5
-    if args.get('marka'):
-        where.append('marka = ?'); params.append(args['marka'])
-    if args.get('kat'):
-        where.append('category = ?'); params.append(args['kat'])
-    if args.get('montaj'):
-        where.append("(',' || montaj || ',') LIKE ?"); params.append(f"%,{args['montaj']},%")
-    if args.get('uyari'):
+    if f.get('q'):
+        for term in f['q'].split():
+            where.append('(sku LIKE ? OR product_name LIKE ? OR ozellik LIKE ? OR category LIKE ? '
+                         'OR alt_grup LIKE ? OR marka LIKE ?)')
+            params += [f'%{term}%'] * 6
+    # Kategori ağacı: ana grup ve kategori seçimleri birbirini genişletir (VEYA)
+    if exclude != 'kat' and (f.get('grup') or f.get('kat')):
+        parts = []
+        if f.get('grup'):
+            parts.append(f"ana_grup IN ({','.join('?' * len(f['grup']))})")
+            params += f['grup']
+        if f.get('kat'):
+            parts.append(f"category IN ({','.join('?' * len(f['kat']))})")
+            params += f['kat']
+        where.append('(' + ' OR '.join(parts) + ')')
+    for key, (col, is_list) in LIST_FACETS.items():
+        vals = f.get(key) or []
+        if key in ('grup', 'kat') or key == exclude or not vals:
+            continue
+        if is_list:
+            where.append('(' + ' OR '.join([f"(',' || COALESCE({col},'') || ',') LIKE ?"] * len(vals)) + ')')
+            params += [f'%,{v},%' for v in vals]
+        else:
+            where.append(f"{col} IN ({','.join('?' * len(vals))})")
+            params += vals
+    for key, col, op in (('wmin', 'watt', '>='), ('wmax', 'watt', '<='), ('pmin', 'price', '>='), ('pmax', 'price', '<=')):
+        if exclude in ('watt', 'price') and col == exclude:
+            continue
+        try:
+            v = float(f.get(key, '').replace(',', '.'))
+        except ValueError:
+            continue
+        where.append(f'{col} {op} ?')
+        params.append(v)
+    if f.get('uyari') == '1':
         where.append("COALESCE(uyari,'') <> ''")
+    elif f.get('uyari') == '0':
+        where.append("COALESCE(uyari,'') = ''")
+    if f.get('gorsel') == '1':
+        where.append('(image_blob IS NOT NULL OR image_data IS NOT NULL)')
     return ' AND '.join(where), params
+
+
+def facet_counts(db, f, key):
+    col, is_list = LIST_FACETS[key]
+    w, p = build_filter(f, exclude=key)
+    counts = {}
+    if is_list:
+        for (val,) in db.execute(f"SELECT {col} FROM products WHERE {w} AND COALESCE({col},'')<>''", p):
+            for v in val.split(','):
+                counts[v] = counts.get(v, 0) + 1
+    else:
+        for r in db.execute(f"SELECT {col}, COUNT(*) FROM products WHERE {w} AND COALESCE({col},'')<>'' "
+                            f"GROUP BY {col}", p):
+            counts[r[0]] = r[1]
+    return counts
+
+
+def sort_values(key, counts):
+    if key == 'cct':
+        def k(v):
+            return (0, int(v[:-1])) if re.fullmatch(r'\d{4}K', v) else (1, v)
+        return sorted(counts, key=k)
+    if key == 'ip':
+        return sorted(counts)
+    if key == 'montaj':
+        order = ['Sıva Altı', 'Sıva Üstü', 'Ray Tipi', 'Duvar Tipi']
+        return sorted(counts, key=lambda v: (order.index(v) if v in order else 9, v))
+    return sorted(counts, key=lambda v: (-counts[v], v))
+
+
+def url_without(f, key, value=None):
+    """Aktif filtre çipinden tek bir değeri kaldıran URL."""
+    params = {}
+    for k in LIST_FACETS:
+        vals = [v for v in f[k] if not (k == key and (value is None or v == value))]
+        if vals:
+            params[k] = vals
+    for k in ('q', 'wmin', 'wmax', 'pmin', 'pmax', 'uyari', 'gorsel', 'sort', 'gorunum'):
+        if f.get(k) and k != key and not (key == 'watt' and k in ('wmin', 'wmax')) \
+                and not (key == 'price' and k in ('pmin', 'pmax')):
+            params[k] = f[k]
+    if f['adet'] != 48:
+        params['adet'] = f['adet']
+    return url_for('catalog', **params)
 
 
 # ── Sayfalar ──
 @app.route('/')
-def index():
+def panel():
+    """Genel durum paneli."""
     db = get_db()
-    args = {k: (request.args.get(k) or '').strip() for k in ('q', 'marka', 'kat', 'montaj', 'uyari')}
-    page = max(1, request.args.get('sayfa', 1, type=int))
-    where, params = build_filter(args)
-    count = db.execute(f'SELECT COUNT(*) FROM products WHERE {where}', params).fetchone()[0]
-    products = db.execute(f'''SELECT id, sku, product_name, price, currency, category, ana_grup, alt_grup,
-                              montaj, uyari, source_page, marka, image_blob IS NOT NULL AS has_img, image_data
-                              FROM products WHERE {where}
-                              ORDER BY ana_grup, category, alt_grup, id LIMIT ? OFFSET ?''',
-                          params + [PER_PAGE, (page - 1) * PER_PAGE]).fetchall()
-
-    # Kenar menüsü: marka filtresi dışındaki filtreler sayılara yansımaz (genel görünüm)
-    mw, mp = build_filter({'marka': args['marka']})
     rules = kategori.load_rules()
-    order = {gname: i for i, gname in enumerate(rules['grup_sirasi'])}
-    groups = {}
-    for r in db.execute(f'''SELECT COALESCE(ana_grup,'Diğer') g, COALESCE(category,'Kategorisiz') c, COUNT(*) n,
-                            SUM(CASE WHEN COALESCE(uyari,'')<>'' THEN 1 ELSE 0 END) w
-                            FROM products WHERE {mw} GROUP BY g, c ORDER BY c''', mp):
-        groups.setdefault(r['g'], []).append(r)
-    groups = sorted(groups.items(), key=lambda kv: order.get(kv[0], 99))
-    montaj = {}
-    for r in db.execute(f"SELECT montaj, uyari FROM products WHERE {mw} AND COALESCE(montaj,'')<>''", mp):
-        for m in r['montaj'].split(','):
-            montaj[m] = montaj.get(m, 0) + 1
-    montaj_list = [(m, rules['montaj_etiket'].get(m, m), montaj[m])
-                   for m in ['Sıva Altı', 'Sıva Üstü', 'Ray Tipi', 'Duvar Tipi'] if m in montaj]
-    stats = db.execute(f'''SELECT COUNT(*) n, COUNT(DISTINCT category) k, COUNT(DISTINCT marka) m,
-                           SUM(CASE WHEN COALESCE(uyari,'')<>'' THEN 1 ELSE 0 END) w FROM products WHERE {mw}''', mp).fetchone()
-    markalar = [r[0] for r in db.execute('SELECT DISTINCT marka FROM products WHERE marka IS NOT NULL ORDER BY marka')]
+    k = db.execute('''SELECT COUNT(*) n, COUNT(DISTINCT marka) m, COUNT(DISTINCT category) c,
+                         SUM(CASE WHEN COALESCE(uyari,'')<>'' THEN 1 ELSE 0 END) w,
+                         SUM(CASE WHEN image_blob IS NOT NULL OR image_data IS NOT NULL THEN 1 ELSE 0 END) g,
+                         SUM(CASE WHEN price IS NOT NULL AND price > 0 THEN 1 ELSE 0 END) f
+                  FROM products''').fetchone()
+    brands = db.execute('''SELECT marka, COUNT(*) n, COUNT(DISTINCT category) c,
+                              SUM(CASE WHEN COALESCE(uyari,'')<>'' THEN 1 ELSE 0 END) w,
+                              MIN(CASE WHEN price>0 THEN price END) pmin, MAX(price) pmax, MAX(currency) cur
+                       FROM products GROUP BY marka ORDER BY n DESC''').fetchall()
+    order = {g: i for i, g in enumerate(rules['grup_sirasi'])}
+    groups = sorted(db.execute('''SELECT ana_grup g, COUNT(*) n, COUNT(DISTINCT category) c FROM products
+                                  GROUP BY ana_grup''').fetchall(), key=lambda r: order.get(r['g'], 99))
+    top_cats = db.execute('''SELECT category, ana_grup, COUNT(*) n FROM products GROUP BY category
+                              ORDER BY n DESC LIMIT 10''').fetchall()
+    montaj = facet_counts(db, {kk: [] for kk in LIST_FACETS}, 'montaj')
+    montaj = [(m, rules['montaj_etiket'].get(m, m), montaj[m]) for m in sort_values('montaj', montaj)]
+    ips = facet_counts(db, {kk: [] for kk in LIST_FACETS}, 'ip')
+    warns = {}
+    for (u,) in db.execute("SELECT uyari FROM products WHERE COALESCE(uyari,'')<>''"):
+        for x in u.split('|'):
+            warns[x] = warns.get(x, 0) + 1
+    catalogs = db.execute('SELECT * FROM catalogs ORDER BY yuklenme DESC LIMIT 10').fetchall()
+    return render_template('panel.html', k=k, brands=brands, groups=groups, top_cats=top_cats, montaj=montaj,
+                           ips=sorted(ips.items()), warns=sorted(warns.items(), key=lambda x: -x[1]),
+                           catalogs=catalogs)
 
-    if args['montaj']:
-        title = rules['montaj_etiket'].get(args['montaj'], args['montaj'])
-    elif args['kat']:
-        title = args['kat']
-    elif args['uyari']:
-        title = 'Uyarılı ürünler'
-    else:
-        title = 'Tüm ürünler'
-    pages = (count + PER_PAGE - 1) // PER_PAGE
-    return render_template('index.html', products=products, args=args, count=count, page=page, pages=pages,
-                           groups=groups, montaj_list=montaj_list, stats=stats, markalar=markalar, title=title)
+
+@app.route('/katalog')
+def catalog():
+    db = get_db()
+    f = read_filters(request)
+    page = max(1, request.args.get('sayfa', 1, type=int))
+    where, params = build_filter(f)
+    count = db.execute(f'SELECT COUNT(*) FROM products WHERE {where}', params).fetchone()[0]
+    pages = max(1, (count + f['adet'] - 1) // f['adet'])
+    page = min(page, pages)
+    products = db.execute(f'''SELECT id, sku, product_name, price, currency, category, ana_grup, alt_grup,
+                              montaj, uyari, source_page, marka, watt, cct, renk, ip,
+                              (image_blob IS NOT NULL OR image_data IS NOT NULL) AS has_img
+                              FROM products WHERE {where}
+                              ORDER BY {SORTS[f['sort']][1]} LIMIT ? OFFSET ?''',
+                          params + [f['adet'], (page - 1) * f['adet']]).fetchall()
+
+    rules = kategori.load_rules()
+    facets = {}
+    for key in LIST_FACETS:
+        if key in ('kat', 'grup'):
+            continue
+        c = facet_counts(db, f, key)
+        for v in f[key]:
+            c.setdefault(v, 0)
+        facets[key] = [(v, rules['montaj_etiket'].get(v, v) if key == 'montaj' else v, c[v])
+                       for v in sort_values(key, c)]
+    # kategori ağacı: ana grup > kategori
+    kc = facet_counts(db, f, 'kat')
+    for v in f['kat']:
+        kc.setdefault(v, 0)
+    gw, gp = build_filter(f, exclude='kat')
+    tree = {}
+    for r in db.execute(f'SELECT DISTINCT ana_grup, category FROM products WHERE {gw}', gp):
+        tree.setdefault(r[0] or 'Diğer', set()).add(r[1])
+    for v in f['kat']:
+        g = db.execute('SELECT ana_grup FROM products WHERE category=? LIMIT 1', (v,)).fetchone()
+        tree.setdefault(g[0] if g else 'Diğer', set()).add(v)
+    order = {g: i for i, g in enumerate(rules['grup_sirasi'])}
+    tree = [(g, sorted(cs, key=lambda c: c or ''), sum(kc.get(c, 0) for c in cs))
+            for g, cs in sorted(tree.items(), key=lambda kv: order.get(kv[0], 99))]
+    ww, wp = build_filter(f, exclude='watt')
+    wr = db.execute(f'SELECT MIN(watt), MAX(watt) FROM products WHERE {ww} AND watt IS NOT NULL', wp).fetchone()
+    pw, pp = build_filter(f, exclude='price')
+    pr = db.execute(f'SELECT MIN(price), MAX(price), MAX(currency) FROM products WHERE {pw} AND price > 0', pp).fetchone()
+
+    chips = []
+    for key in LIST_FACETS:
+        for v in f[key]:
+            label = rules['montaj_etiket'].get(v, v) if key == 'montaj' else v
+            chips.append((FACET_LABELS[key], label, url_without(f, key, v)))
+    if f['q']:
+        chips.append(('Arama', f['q'], url_without(f, 'q')))
+    if f['wmin'] or f['wmax']:
+        chips.append(('Güç', f"{f['wmin'] or '0'}–{f['wmax'] or '∞'} W", url_without(f, 'watt')))
+    if f['pmin'] or f['pmax']:
+        chips.append(('Fiyat', f"{f['pmin'] or '0'}–{f['pmax'] or '∞'}", url_without(f, 'price')))
+    if f['uyari']:
+        chips.append(('Durum', 'Uyarılı' if f['uyari'] == '1' else 'Sorunsuz', url_without(f, 'uyari')))
+    if f['gorsel']:
+        chips.append(('Durum', 'Görselli', url_without(f, 'gorsel')))
+    total = db.execute('SELECT COUNT(*) FROM products').fetchone()[0]
+
+    def page_url(n=None, **over):
+        params = {k: v for k, v in f.items() if v and k != 'adet'}
+        if f['adet'] != 48:
+            params['adet'] = f['adet']
+        params.update(over)
+        if n:
+            params['sayfa'] = n
+        return url_for('catalog', **{k: v for k, v in params.items() if v})
+
+    return render_template('katalog.html', products=products, f=f, count=count, total=total, page=page,
+                           pages=pages, facets=facets, tree=tree, kc=kc, wr=wr, pr=pr, chips=chips,
+                           sorts=SORTS, labels=FACET_LABELS, page_url=page_url, per_page=PER_PAGE_OPTIONS)
 
 
 @app.route('/img/<int:pid>')
@@ -256,7 +450,7 @@ def upload():
 def job_page(job_id):
     if job_id not in JOBS:
         flash('İşlem bulunamadı (sunucu yeniden başlamış olabilir).', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('catalog'))
     return render_template('job.html', job_id=job_id, job=JOBS[job_id])
 
 
@@ -275,13 +469,15 @@ def delete_all():
     db = get_db()
     if marka:
         db.execute('DELETE FROM products WHERE marka = ?', (marka,))
+        db.execute('DELETE FROM catalogs WHERE marka = ?', (marka,))
         msg = f'{marka} ürünleri silindi.'
     else:
         db.execute('DELETE FROM products')
+        db.execute('DELETE FROM catalogs')
         msg = 'Tüm ürünler silindi.'
     db.commit()
     flash(msg, 'success')
-    return redirect(url_for('index'))
+    return redirect(url_for('panel'))
 
 
 @app.route('/yeniden-kategorize', methods=['POST'])
@@ -299,7 +495,7 @@ def recategorize():
                    (grup, kat, ','.join(mont), r['id']))
     db.commit()
     flash(f'{len(rows)} ürün yeniden kategorize edildi.', 'success')
-    return redirect(url_for('index'))
+    return redirect(url_for('panel'))
 
 
 @app.route('/export-quote', methods=['POST'])
@@ -314,7 +510,7 @@ def export_quote():
     id_list = [int(x) for x in ids.split(',') if x.strip().isdigit()]
     if not id_list:
         flash('Teklif için ürün seçilmedi.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('catalog'))
 
     db = get_db()
     placeholders = ','.join(['?'] * len(id_list))
@@ -408,7 +604,8 @@ def sistem_kontrol():
     checks['uyarili_urun'] = db.execute("SELECT COUNT(*) FROM products WHERE COALESCE(uyari,'')<>''").fetchone()[0]
     checks['yuklenen_pdfler'] = ', '.join(f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith('.pdf')) or 'yok'
     checks['veritabani'] = DB_PATH
-    return render_template('sistem.html', checks=checks)
+    markalar = [r[0] for r in db.execute('SELECT DISTINCT marka FROM products WHERE marka IS NOT NULL ORDER BY marka')]
+    return render_template('sistem.html', checks=checks, markalar=markalar)
 
 
 init_db()

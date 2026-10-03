@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33012778/README.md)
 # Akıllı Katalog
 
 PDF katalogların **tamamından** ürünleri (SKU, ad, fiyat, görsel) otomatik çıkaran, ürünleri ortak
@@ -14,8 +13,14 @@ kendi SQLite veritabanıyla çalışır.
   ana grup / kategoriye eşlenir (İç Mekan › LED Paneller, Dış Mekan › Bahçe Armatürleri…)
 - **Montaj tipi**: Sıva Altı, Sıva Üstü, Ray Tipi, Duvar Tipi (ürün adından ya da sayfadaki ikondan)
 - Uyarılı ürünler işaretlenir (fiyat listesinde yok, fiyat bulunamadı, sayfada bulunamadı…)
-- Arama, marka/kategori/montaj filtresi, seçili ürünlerden Excel fiyat teklifi
-- `/sistem-kontrol` sayfası: kütüphaneler, ürün/marka sayıları
+- **Panel** (`/`): toplam ürün, marka, fiyat/görsel kapsamı, ana grup ve kategori dağılımı,
+  montaj tipi, IP sınıfı, kontrol bekleyenler, markalar ve yüklenen kataloglar
+- **Ürün Kataloğu** (`/katalog`): çoklu seçimli filtreler — marka, montaj tipi, kategori ağacı,
+  ışık rengi (3000K/4000K/6500K/CCT/RGB), güç aralığı (W), gövde rengi, IP sınıfı, fiyat aralığı,
+  durum. Her seçenekte canlı ürün sayısı, aktif filtre çipleri, sıralama, ızgara/liste görünümü,
+  sayfalar arası korunan teklif seçimi
+- Filtreler URL'de tutulur; filtrelenmiş bir görünümün bağlantısı paylaşılabilir
+- `/sistem-kontrol`: kütüphaneler, veritabanı, kuralları yeniden uygulama, marka silme
 
 ## Hazır veri
 `data/ack-2026.json.gz` — ACK 2026 Fiyat Listesi'nden çıkarılmış 1.640 ürün (görselleriyle).
@@ -41,7 +46,7 @@ Veritabanı boşsa uygulama açılışta bunu otomatik yükler, böylece deploy 
 ## Yeni marka eklerken
 1. PDF'i marka adıyla yükleyin.
 2. "Diğer" grubuna düşen kategorileri `kategori_kurallari.json` → `baslik` bölümüne ekleyin.
-3. Sol menüdeki **Kuralları yeniden uygula** düğmesine basın (PDF'i tekrar işlemeye gerek yok).
+3. **Sistem** sayfasındaki **Yeniden uygula** düğmesine basın (PDF'i tekrar işlemeye gerek yok).
 
 ## Yerel çalıştırma
 ```

@@ -8,8 +8,8 @@
     <div class="progress mt-4" style="height:10px;"><div id="bar" class="progress-bar bg-dark" style="width:0%"></div></div>
     <p id="msg" class="mt-2 text-muted">{{ job.msg }}</p>
     <div id="done" class="d-none">
-      <a href="{{ url_for('index', marka=job.marka) }}" class="btn btn-dark">Ürünleri gör</a>
-      <a href="{{ url_for('index', marka=job.marka, uyari='1') }}" class="btn btn-outline-danger">Uyarılıları kontrol et</a>
+      <a href="{{ url_for('catalog', marka=job.marka) }}" class="btn btn-dark">Ürünleri gör</a>
+      <a href="{{ url_for('catalog', marka=job.marka, uyari='1') }}" class="btn btn-outline-danger">Uyarılıları kontrol et</a>
     </div>
   </div>
 </div>

@@ -1,4 +1,3 @@
-
 {% extends 'base.html' %}
 {% block title %}PDF Yükle - Akıllı Katalog{% endblock %}
 
@@ -27,7 +26,7 @@
                         <input type="file" id="pdf" name="pdf" accept="application/pdf" class="form-control" required>
                     </div>
                     <div class="d-flex justify-content-end gap-2">
-                        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">İptal</a>
+                        <a href="{{ url_for('catalog') }}" class="btn btn-outline-secondary">İptal</a>
                         <button type="submit" class="btn btn-dark"><i class="bi bi-magic me-1"></i>Kataloğu İşle</button>
                     </div>
                 </form>

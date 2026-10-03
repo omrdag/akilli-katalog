@@ -184,6 +184,15 @@ def _badges(page):
     return out
 
 
+def _ip_marks(page):
+    out = []
+    for r, t in _lines(page):
+        m = re.fullmatch(r'-?(IP\s?\d{2})-?', t.strip())
+        if m:
+            out.append((r, m.group(1).replace(' ', '')))
+    return out
+
+
 def _render(page, rect, max_px=360):
     z = min(max_px / max(rect.width, rect.height), 2.0)
     pix = page.get_pixmap(matrix=fitz.Matrix(z, z), clip=rect)
@@ -199,6 +208,7 @@ def extract_page(page, pno, sku_re):
     subs = _subtitles(lines)
     regions = _photo_regions(page)
     badges = _badges(page)
+    ips = _ip_marks(page)
     prices = [(r, PRICE_RE.search(t)) for r, t in lines if PRICE_RE.search(t)]
     powers = [(r, t) for r, t in lines if POWER_RE.match(t) and len(t) < 40]
     title = _side_title(page)
@@ -231,9 +241,10 @@ def extract_page(page, pno, sku_re):
         sub = min(sb)[1] if sb else (subs[0][1] if subs else '')
         reg = min(regions, key=lambda r: _dist(sr, r)) if regions else None
         badge = min(badges, key=lambda b: _dist(sr, b[0]))[1] if badges else ''
+        ip = min(ips, key=lambda b: _dist(sr, b[0]))[1] if ips else ''
         out.append(dict(sku=sku, page=pno, title=title, sub=sub, power=_clean(power), label=_clean(label),
                         variant=_clean(variant), price=_num(pm.group(1)) if pm else None,
-                        currency=pm.group(2) if pm else None, region=reg, badge=badge))
+                        currency=pm.group(2) if pm else None, region=reg, badge=badge, ip=ip))
     return out
 
 
@@ -306,12 +317,12 @@ def extract_catalog(pdf_path, progress=None):
         products.append(dict(sku=p['sku'], ad=ad, katalog_baslik=p['title'].strip(), alt_grup=p['sub'],
                              ozellik=' '.join(x for x in [power, p['label'], p['variant']] if x),
                              fiyat=price, para_birimi=cur or '', sayfa=p['page'] - shift,
-                             montaj_rozeti=p['badge'], image_jpeg=p['image_jpeg'], uyari=uyari))
+                             montaj_rozeti=p['badge'], ip=p['ip'], image_jpeg=p['image_jpeg'], uyari=uyari))
     for sku, ix in plist.items():
         if sku not in seen:
             products.append(dict(sku=sku, ad='', katalog_baslik='', alt_grup='', ozellik='',
                                  fiyat=ix['price'], para_birimi=ix['currency'] or '', sayfa=ix['page'],
-                                 montaj_rozeti='', image_jpeg=None,
+                                 montaj_rozeti='', ip='', image_jpeg=None,
                                  uyari=['Fiyat listesinde var, sayfada bulunamadı']))
     stats = dict(sayfa=n, fiyat_listesi_sayfalari=plist_pages, fiyat_listesi_kod=len(plist),
                  urun=len(products), gorsel=len(cache), sku_kalibi=sku_re.pattern)

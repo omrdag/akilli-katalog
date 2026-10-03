@@ -1,0 +1,171 @@
+{% extends 'base.html' %}
+{% block title %}Panel - Akıllı Katalog{% endblock %}
+{% block head %}
+<style>
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi { padding: 14px 16px; }
+  .kpi .v { font-size: 1.75rem; font-weight: 700; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .kpi .d { color: var(--muted); font-size: .8rem; margin-top: 2px; }
+  .kpi .meter { height: 4px; background: var(--line-2); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+  .kpi .meter span { display: block; height: 100%; background: var(--ok); border-radius: 2px; }
+  .kpi.warn .v { color: var(--warn); }
+  .kpi.warn .meter span { background: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 1100px) { .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); } }
+  .bars { padding: 2px 16px 14px; display: flex; flex-direction: column; gap: 7px; }
+  .bar-row { display: grid; grid-template-columns: minmax(110px, 38%) minmax(0, 1fr) 52px; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); border-radius: 4px; padding: 2px 4px; }
+  .bar-row:hover { background: var(--line-2); }
+  .bar-row .l { font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-row .t { height: 12px; background: transparent; }
+  .bar-row .t span { display: block; height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .bar-row .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: .82rem; }
+  .bar-row .sub { color: var(--muted); font-size: .72rem; }
+  table.tbl { width: 100%; border-collapse: collapse; }
+  .tbl th { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; padding: 8px 16px; border-bottom: 1px solid var(--line); text-align: left; }
+  .tbl td { padding: 10px 16px; border-bottom: 1px solid var(--line-2); font-variant-numeric: tabular-nums; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl .r { text-align: right; }
+  .warnlist { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .warnlist a { display: flex; justify-content: space-between; text-decoration: none; padding: 8px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-weight: 500; }
+  .empty-state { padding: 60px 20px; text-align: center; color: var(--muted); }
+  .ok-note { margin: 0 16px 14px; padding: 10px 12px; background: var(--ok-soft); color: var(--ok); border-radius: 6px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Genel Durum</h1>
+    <div class="sub">Yüklenen kataloglar, kategori dağılımı ve kontrol bekleyen ürünler</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('catalog') }}" class="btn btn-outline-dark btn-sm"><i class="bi bi-search me-1"></i>Ürün ara</a>
+    <a href="{{ url_for('upload') }}" class="btn btn-accent btn-sm"><i class="bi bi-file-earmark-arrow-up me-1"></i>Katalog yükle</a>
+  </div>
+</div>
+
+{% if not k.n %}
+<div class="box empty-state">
+  <i class="bi bi-inbox" style="font-size:2.5rem"></i>
+  <p class="mt-2">Henüz katalog yok. İlk PDF kataloğunu yükleyerek başlayın.</p>
+  <a href="{{ url_for('upload') }}" class="btn btn-accent">Katalog yükle</a>
+</div>
+{% else %}
+{% macro pct(a) %}{{ (((a or 0) * 100 / k.n) | round | int) }}{% endmacro %}
+<div class="kpis">
+  <div class="box kpi"><div class="eyebrow">Toplam ürün</div><div class="v">{{ '{:,}'.format(k.n).replace(',', '.') }}</div><div class="d">{{ k.m }} marka · {{ k.c }} kategori</div></div>
+  <div class="box kpi"><div class="eyebrow">Markalar</div><div class="v">{{ k.m }}</div><div class="d">{{ brands | map(attribute='marka') | join(', ') }}</div></div>
+  <div class="box kpi"><div class="eyebrow">Fiyatı olan</div><div class="v">%{{ pct(k.f) }}</div><div class="meter"><span style="width:{{ pct(k.f) }}%"></span></div><div class="d">{{ k.f }} / {{ k.n }} ürün</div></div>
+  <div class="box kpi"><div class="eyebrow">Görseli olan</div><div class="v">%{{ pct(k.g) }}</div><div class="meter"><span style="width:{{ pct(k.g) }}%"></span></div><div class="d">{{ k.g }} / {{ k.n }} ürün</div></div>
+  <a class="box kpi warn text-decoration-none" href="{{ url_for('catalog', uyari='1') }}"><div class="eyebrow">Kontrol bekleyen</div><div class="v">{{ k.w or 0 }}</div><div class="meter"><span style="width:{{ pct(k.w) }}%"></span></div><div class="d">Uyarılı ürünleri incele →</div></a>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <div class="box-h">Ana gruplara göre ürünler <small>Tıklayınca katalogda filtrelenir</small></div>
+    {% set gmax = groups | map(attribute='n') | max %}
+    <div class="bars">
+      {% for g in groups %}
+      <a class="bar-row" href="{{ url_for('catalog', grup=g.g) }}" title="{{ g.g }}: {{ g.n }} ürün, {{ g.c }} kategori">
+        <span class="l">{{ g.g }} <span class="sub">· {{ g.c }} kat.</span></span>
+        <span class="t"><span style="width:{{ (g.n * 100 / gmax) | round(1) }}%"></span></span>
+        <span class="n">{{ g.n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="box">
+    <div class="box-h">En kalabalık 10 kategori</div>
+    {% set cmax = top_cats | map(attribute='n') | max %}
+    <div class="bars">
+      {% for c in top_cats %}
+      <a class="bar-row" href="{{ url_for('catalog', kat=c.category) }}" title="{{ c.ana_grup }} › {{ c.category }}: {{ c.n }} ürün">
+        <span class="l">{{ c.category }}</span>
+        <span class="t"><span style="width:{{ (c.n * 100 / cmax) | round(1) }}%"></span></span>
+        <span class="n">{{ c.n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="grid3">
+  <div class="box">
+    <div class="box-h">Montaj tipi</div>
+    {% set mmax = (montaj | map(attribute=2) | max) if montaj else 1 %}
+    <div class="bars">
+      {% for key, label, n in montaj %}
+      <a class="bar-row" href="{{ url_for('catalog', montaj=key) }}" title="{{ label }}: {{ n }} ürün">
+        <span class="l">{{ label }}</span>
+        <span class="t"><span style="width:{{ (n * 100 / mmax) | round(1) }}%"></span></span>
+        <span class="n">{{ n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="box">
+    <div class="box-h">Koruma sınıfı (IP)</div>
+    {% set imax = (ips | map(attribute=1) | max) if ips else 1 %}
+    <div class="bars">
+      {% for ip, n in ips %}
+      <a class="bar-row" href="{{ url_for('catalog', ip=ip) }}" title="{{ ip }}: {{ n }} ürün">
+        <span class="l">{{ ip }}</span>
+        <span class="t"><span style="width:{{ (n * 100 / imax) | round(1) }}%"></span></span>
+        <span class="n">{{ n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="box">
+    <div class="box-h">Kontrol bekleyenler</div>
+    {% if warns %}
+    <div class="warnlist">
+      {% for w, n in warns %}
+      <a href="{{ url_for('catalog', uyari='1', q='') }}"><span><i class="bi bi-exclamation-triangle me-1"></i>{{ w }}</span><span class="num">{{ n }}</span></a>
+      {% endfor %}
+    </div>
+    {% else %}<div class="ok-note"><i class="bi bi-check-circle me-1"></i>Kontrol bekleyen ürün yok.</div>{% endif %}
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <div class="box-h">Markalar</div>
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr><th>Marka</th><th class="r">Ürün</th><th class="r">Kategori</th><th class="r">Fiyat aralığı</th><th class="r">Uyarılı</th><th></th></tr></thead>
+      <tbody>
+      {% for b in brands %}
+      {% set sym = {'USD': '$', 'EUR': '€'}.get(b.cur, '₺') %}
+      <tr>
+        <td class="fw-semibold">{{ b.marka or '—' }}</td>
+        <td class="r">{{ b.n }}</td>
+        <td class="r">{{ b.c }}</td>
+        <td class="r">{% if b.pmin %}{{ '%.2f' % b.pmin }}–{{ '%.2f' % b.pmax }} {{ sym }}{% else %}—{% endif %}</td>
+        <td class="r">{% if b.w %}<span class="pill">{{ b.w }}</span>{% else %}0{% endif %}</td>
+        <td class="r"><a href="{{ url_for('catalog', marka=b.marka) }}" class="btn btn-outline-dark btn-sm py-0">Aç</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <div class="box">
+    <div class="box-h">Yüklenen kataloglar</div>
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr><th>Marka</th><th>Dosya</th><th class="r">Sayfa</th><th class="r">Ürün</th><th>Tarih</th></tr></thead>
+      <tbody>
+      {% for c in catalogs %}
+      <tr><td class="fw-semibold">{{ c.marka }}</td><td class="text-truncate" style="max-width:220px" title="{{ c.dosya }}">{{ c.dosya }}</td>
+          <td class="r">{{ c.sayfa or '—' }}</td><td class="r">{{ c.urun }}</td><td class="text-muted text-nowrap">{{ (c.yuklenme or '')[:16] }}</td></tr>
+      {% else %}
+      <tr><td colspan="5" class="text-muted">Kayıt yok.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

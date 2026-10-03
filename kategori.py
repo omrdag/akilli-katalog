@@ -50,3 +50,44 @@ def classify(p, rules=None):
                 montaj = [r['tip']]
                 break
     return grp[0], grp[1], montaj
+
+
+# ── Filtre özellikleri ──
+RENKLER = {
+    'beyaz': 'Beyaz', 'siyah': 'Siyah', 'füme': 'Füme', 'gri': 'Gri', 'krom': 'Krom',
+    'saten': 'Saten', 'altın': 'Altın', 'gold': 'Altın', 'bakır': 'Bakır', 'gül': 'Gül',
+    'bronz': 'Bronz', 'gümüş': 'Gümüş', 'antrasit': 'Antrasit', 'kahverengi': 'Kahverengi',
+}
+IŞIK_RENKLERİ = {'mavi': 'Mavi', 'yeşil': 'Yeşil', 'kırmızı': 'Kırmızı', 'sarı': 'Sarı', 'amber': 'Amber', 'pembe': 'Pembe'}
+
+
+def attributes(p):
+    """Ürün adından/özelliğinden filtrelenebilir özellikler: güç (W), ışık rengi, gövde rengi, IP."""
+    text = ' '.join([p.get('ad') or '', p.get('ozellik') or ''])
+    low = norm(text)
+    watt = None
+    m = re.search(r'(?<![\d.,])(\d{1,4}(?:[.,]\d+)?)\s?W\b', text)
+    if m:
+        try:
+            watt = float(m.group(1).replace(',', '.'))
+        except ValueError:
+            watt = None
+    cct = []
+    for k in re.findall(r'\b(\d{4})\s?K\b', text):
+        if 1800 <= int(k) <= 10000 and f'{k}K' not in cct:
+            cct.append(f'{k}K')
+    for tag in ('CCT', 'RGBW', 'RGB'):
+        if re.search(rf'\b{tag}\b', text) and tag not in cct:
+            cct.append(tag)
+    for w, lab in IŞIK_RENKLERİ.items():
+        if re.search(rf'\b{w}\b', low) and lab not in cct:
+            cct.append(lab)
+    renk = []
+    for w, lab in RENKLER.items():
+        if re.search(rf'\b{w}\b', low) and lab not in renk:
+            renk.append(lab)
+    ip = (p.get('ip') or '').upper()
+    m = re.search(r'\bIP\s?(\d{2})\b', text)
+    if m:
+        ip = 'IP' + m.group(1)
+    return dict(watt=watt, cct=','.join(cct), renk=','.join(renk), ip=ip)
