@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -9,7 +10,19 @@
     <style>
         body { background: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; }
         .navbar-brand { font-weight: 700; letter-spacing: 0.5px; }
-        .navbar { background: linear-gradient(135deg, #1e40af, #2563eb) !important; }
+        .navbar { background: #1d2024 !important; }
+        .navbar-brand i { color: #f0b429; }
+        .side .lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin: 14px 0 4px; padding-left: 8px; }
+        .side a { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; border-radius: 4px; color: #1d2024; text-decoration: none; font-size: .9rem; }
+        .side a:hover { background: #fff; }
+        .side a.active { background: #1d2024; color: #fff; }
+        .side a small { font-family: monospace; color: #64748b; }
+        .side a.active small { color: #f0b429; }
+        .side a .w { color: #b5401f; }
+        .stat b { display: block; font-size: 1.5rem; line-height: 1; }
+        .stat small { color: #64748b; text-transform: uppercase; font-size: .68rem; letter-spacing: .06em; }
+        .card.flag { outline: 1px solid #e8a089; }
+        .pill { display: inline-block; background: #fbe5dd; color: #b5401f; border-radius: 3px; padding: 1px 6px; font-size: .68rem; font-weight: 600; }
         .product-card { transition: transform .15s, box-shadow .15s; }
         .product-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
         .sku-code { font-family: monospace; color: #c0397a; font-weight: 600; }
@@ -24,6 +37,9 @@
             <div class="d-flex gap-2">
                 <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm">
                     <i class="bi bi-grid me-1"></i> Katalog
+                </a>
+                <a href="{{ url_for('sistem_kontrol') }}" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-activity me-1"></i> Durum
                 </a>
                 <a href="{{ url_for('upload') }}" class="btn btn-light btn-sm">
                     <i class="bi bi-file-earmark-pdf me-1"></i> PDF Yükle
