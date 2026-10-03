@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}PDF Yükle - Akıllı Katalog{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="d-flex align-items-center mb-4">
+            <i class="bi bi-file-earmark-pdf me-2" style="font-size:1.5rem;"></i>
+            <div>
+                <h4 class="mb-0 fw-semibold">PDF Katalog Yükle</h4>
+                <small class="text-muted">Kataloğun tamamı işlenir; ürünler otomatik kategorize edilir</small>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label fw-medium" for="marka">Marka</label>
+                        <input type="text" id="marka" name="marka" class="form-control" list="markalar" placeholder="Örn: ACK" required>
+                        <datalist id="markalar">{% for m in markalar %}<option value="{{ m }}">{% endfor %}</datalist>
+                        <small class="text-muted">Aynı markayla tekrar yüklerseniz o markanın eski ürünleri yenileriyle değiştirilir.</small>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label fw-medium" for="pdf">PDF Dosyası</label>
+                        <input type="file" id="pdf" name="pdf" accept="application/pdf" class="form-control" required>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('catalog') }}" class="btn btn-outline-secondary">İptal</a>
+                        <button type="submit" class="btn btn-dark"><i class="bi bi-magic me-1"></i>Kataloğu İşle</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="alert alert-light border mt-3" style="font-size:0.85rem;">
+            <strong>Nasıl çalışır?</strong>
+            <ul class="mb-0 mt-1">
+                <li>Ürün kodu kalıbı PDF'ten otomatik bulunur (ör. <code>AD05-02400</code>).</li>
+                <li>Katalogda fiyat listesi sayfaları varsa fiyatlar oradan alınır ve sayfalarla karşılaştırılır.</li>
+                <li>Kategori sayfa kenarındaki başlıktan okunur, <code>kategori_kurallari.json</code> ile ortak kategorilere eşlenir.</li>
+                <li>Sıva altı / sıva üstü bilgisi ürün adından ya da sayfadaki ikonlardan belirlenir.</li>
+                <li>Büyük kataloglar 1–2 dakika sürebilir. Uyarılı ürünleri kontrol etmeniz önerilir.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Katalog işleniyor - Akıllı Katalog{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h4 class="fw-semibold mb-1">{{ job.marka }} kataloğu işleniyor</h4>
+    <small class="text-muted">{{ job.file }}</small>
+    <div class="progress mt-4" style="height:10px;"><div id="bar" class="progress-bar bg-dark" style="width:0%"></div></div>
+    <p id="msg" class="mt-2 text-muted">{{ job.msg }}</p>
+    <div id="done" class="d-none">
+      <a href="{{ url_for('catalog', marka=job.marka) }}" class="btn btn-dark">Ürünleri gör</a>
+      <a href="{{ url_for('catalog', marka=job.marka, uyari='1') }}" class="btn btn-outline-danger">Uyarılıları kontrol et</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function poll(){
+  try{
+    const r = await fetch('{{ url_for("job_status", job_id=job_id) }}'); const j = await r.json();
+    if (j.n) document.getElementById('bar').style.width = Math.round(100*j.i/j.n)+'%';
+    document.getElementById('msg').textContent = j.msg;
+    if (j.state === 'done'){ document.getElementById('bar').style.width='100%'; document.getElementById('done').classList.remove('d-none'); return; }
+    if (j.state === 'error' || j.state === 'missing'){ document.getElementById('msg').classList.add('text-danger'); return; }
+  }catch(e){}
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+{% endblock %}
